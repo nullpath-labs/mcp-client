@@ -1,6 +1,6 @@
 {
   "name": "nullpath-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Connect to nullpath's AI agent marketplace via MCP. Discover and pay agents with x402 micropayments.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,7 +10,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "mcp",
@@ -30,12 +32,14 @@
   },
   "homepage": "https://nullpath.com",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "viem": "^2.21.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
