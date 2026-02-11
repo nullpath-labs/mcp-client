@@ -20,6 +20,16 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import {
+  fetchWithPayment,
+  formatUsdcAmount,
+  isWalletConfigured,
+  WalletNotConfiguredError,
+  InvalidPrivateKeyError,
+  PaymentRequiredError,
+  PaymentSigningError,
+} from './lib/payment.js';
+import { getWalletAddress, createWallet } from './lib/wallet.js';
 
 const NULLPATH_API_URL = process.env.NULLPATH_API_URL || 'https://nullpath.com/api/v1';
 
@@ -180,26 +190,86 @@ async function handleCheckReputation(args: { agentId: string }) {
 }
 
 async function handleExecuteAgent(args: { agentId: string; capabilityId: string; input: unknown }) {
-  // Note: This would need x402 payment handling for production
-  // For now, return info about what would happen
-  const walletKey = process.env.NULLPATH_WALLET_KEY;
-  
-  if (!walletKey) {
+  // Check wallet configuration upfront for better error messages
+  if (!isWalletConfigured()) {
     return {
-      error: 'NULLPATH_WALLET_KEY environment variable not set. Payment required for execution.',
-      info: 'Set your wallet private key to enable paid agent execution.',
+      error: 'Wallet not configured',
+      message: 'Set NULLPATH_WALLET_KEY environment variable with your private key to execute paid agents.',
+      hint: 'Add to Claude Desktop config: "env": { "NULLPATH_WALLET_KEY": "0x..." }',
     };
   }
-  
-  // TODO: Implement full x402 payment flow
-  return apiCall('/execute', {
-    method: 'POST',
-    body: JSON.stringify({
-      targetAgentId: args.agentId,
-      capabilityId: args.capabilityId,
-      input: args.input,
-    }),
+
+  // Validate wallet key is valid before making request
+  try {
+    createWallet();
+  } catch (error) {
+    if (error instanceof InvalidPrivateKeyError) {
+      return {
+        error: 'Invalid wallet key',
+        message: error.message,
+        hint: 'Ensure NULLPATH_WALLET_KEY is a valid 64-character hex string (with or without 0x prefix).',
+      };
+    }
+    throw error;
+  }
+
+  const url = `${NULLPATH_API_URL}/execute`;
+  const body = JSON.stringify({
+    targetAgentId: args.agentId,
+    capabilityId: args.capabilityId,
+    input: args.input,
   });
+
+  try {
+    // Use fetchWithPayment for automatic 402 handling
+    const response = await fetchWithPayment(url, {
+      method: 'POST',
+      body,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`API error (${response.status}): ${error}`);
+    }
+
+    const result = await response.json() as Record<string, unknown>;
+    
+    // Add wallet info to response for transparency
+    const walletAddress = getWalletAddress() ?? 'unknown';
+    return {
+      ...result,
+      _payment: {
+        status: 'paid',
+        from: walletAddress,
+      },
+    };
+  } catch (error) {
+    if (error instanceof WalletNotConfiguredError) {
+      return {
+        error: 'Wallet not configured',
+        message: error.message,
+        hint: 'Add NULLPATH_WALLET_KEY to your environment variables.',
+      };
+    }
+    if (error instanceof PaymentRequiredError) {
+      return {
+        error: 'Payment failed',
+        message: error.message,
+        requirements: error.requirements ? {
+          recipient: error.requirements.recipient,
+          amount: formatUsdcAmount(error.requirements.amount),
+        } : undefined,
+      };
+    }
+    if (error instanceof PaymentSigningError) {
+      return {
+        error: 'Payment signing failed',
+        message: error.message,
+        hint: 'Check that your wallet has sufficient USDC balance on Base.',
+      };
+    }
+    throw error;
+  }
 }
 
 async function handleRegisterAgent(args: {
@@ -209,20 +279,83 @@ async function handleRegisterAgent(args: {
   capabilities: unknown[];
   endpoint: string;
 }) {
-  const walletKey = process.env.NULLPATH_WALLET_KEY;
-  
-  if (!walletKey) {
+  // Check wallet configuration upfront for better error messages
+  if (!isWalletConfigured()) {
     return {
-      error: 'NULLPATH_WALLET_KEY environment variable not set. Payment required for registration.',
-      info: 'Registration costs $0.10 USDC. Set your wallet private key to proceed.',
+      error: 'Wallet not configured',
+      message: 'Set NULLPATH_WALLET_KEY environment variable to register agents.',
+      hint: 'Registration costs $0.10 USDC. Add to Claude Desktop config: "env": { "NULLPATH_WALLET_KEY": "0x..." }',
     };
   }
-  
-  // TODO: Implement full x402 payment flow
-  return apiCall('/agents', {
-    method: 'POST',
-    body: JSON.stringify(args),
-  });
+
+  // Validate wallet key is valid before making request
+  try {
+    createWallet();
+  } catch (error) {
+    if (error instanceof InvalidPrivateKeyError) {
+      return {
+        error: 'Invalid wallet key',
+        message: error.message,
+        hint: 'Ensure NULLPATH_WALLET_KEY is a valid 64-character hex string (with or without 0x prefix).',
+      };
+    }
+    throw error;
+  }
+
+  const url = `${NULLPATH_API_URL}/agents`;
+  const body = JSON.stringify(args);
+
+  try {
+    // Use fetchWithPayment for automatic 402 handling
+    const response = await fetchWithPayment(url, {
+      method: 'POST',
+      body,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`API error (${response.status}): ${error}`);
+    }
+
+    const result = await response.json() as Record<string, unknown>;
+    
+    // Add wallet info to response for transparency
+    const walletAddress = getWalletAddress() ?? 'unknown';
+    return {
+      ...result,
+      _payment: {
+        status: 'paid',
+        from: walletAddress,
+        cost: '$0.10 USDC',
+      },
+    };
+  } catch (error) {
+    if (error instanceof WalletNotConfiguredError) {
+      return {
+        error: 'Wallet not configured',
+        message: error.message,
+        cost: '$0.10 USDC required for registration',
+      };
+    }
+    if (error instanceof PaymentRequiredError) {
+      return {
+        error: 'Payment failed',
+        message: error.message,
+        requirements: error.requirements ? {
+          recipient: error.requirements.recipient,
+          amount: formatUsdcAmount(error.requirements.amount),
+        } : undefined,
+      };
+    }
+    if (error instanceof PaymentSigningError) {
+      return {
+        error: 'Payment signing failed',
+        message: error.message,
+        hint: 'Ensure your wallet has at least $0.10 USDC on Base.',
+      };
+    }
+    throw error;
+  }
 }
 
 // Main server
