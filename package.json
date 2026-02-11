@@ -1,0 +1,35 @@
+{
+  "name": "nullpath-mcp",
+  "version": "1.0.0",
+  "description": "TypeScript MCP client for nullpath.com agent marketplace",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "nullpath-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/index.js",
+    "watch": "tsc --watch",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "nullpath",
+    "agent",
+    "marketplace",
+    "ai"
+  ],
+  "author": "nullpath-labs",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
