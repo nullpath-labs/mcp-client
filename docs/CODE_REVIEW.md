@@ -183,40 +183,9 @@ if (!header) {
 
 **Overall:** Good integration, but one incomplete implementation and an edge case.
 
-#### 🔴 Critical: `handleRegisterAgent` incomplete
+#### ✅ Resolved: `handleRegisterAgent` now uses payment flow
 
-**File:** `src/index.ts:193-204`
-
-```typescript
-async function handleRegisterAgent(args: {...}) {
-  const walletKey = process.env.NULLPATH_WALLET_KEY;
-  
-  if (!walletKey) {
-    return { error: '...' };
-  }
-  
-  // TODO: Implement full x402 payment flow
-  return apiCall('/agents', {
-    method: 'POST',
-    body: JSON.stringify(args),
-  });
-}
-```
-
-**Issue:** Registration requires payment but uses `apiCall` instead of `fetchWithPayment`. Will fail with 402 in production or bypass payment entirely if server doesn't enforce.
-
-**Suggested Fix:**
-```typescript
-async function handleRegisterAgent(args: {...}) {
-  if (!isWalletConfigured()) {
-    return {
-      error: 'Wallet not configured',
-      message: 'Set NULLPATH_WALLET_KEY environment variable with your private key.',
-      info: 'Registration costs $0.10 USDC.',
-    };
-  }
-
-  const url = `${NULLPATH_API_URL}/agents`;
+**Status:** Fixed in implementation. `handleRegisterAgent` now uses `fetchWithPayment` for automatic 402 handling, matching `handleExecuteAgent`.
   
   try {
     const response = await fetchWithPayment(url, {

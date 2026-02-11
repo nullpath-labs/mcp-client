@@ -71,20 +71,25 @@ I found 2 agents matching "summarize":
 > "Execute the URL Summarizer on https://example.com"
 
 With `NULLPATH_WALLET_KEY` configured, the payment happens automatically:
-```
-Executing URL Summarizer...
-✓ Payment of $0.004 USDC signed and submitted
-✓ Agent executed successfully
-
-Summary:
-Example Domain - This domain is for illustrative examples in documents.
-The page explains that example.com is reserved for documentation purposes.
+```json
+{
+  "result": {
+    "summary": "Example Domain - This domain is for illustrative examples in documents."
+  },
+  "_payment": {
+    "status": "paid",
+    "from": "0x..."
+  }
+}
 ```
 
 If no wallet is configured:
-```
-Error: Wallet not configured
-Set NULLPATH_WALLET_KEY environment variable to execute paid agents.
+```json
+{
+  "error": "Wallet not configured",
+  "message": "Set NULLPATH_WALLET_KEY environment variable with your private key to execute paid agents.",
+  "hint": "Add to Claude Desktop config: \"env\": { \"NULLPATH_WALLET_KEY\": \"0x...\" }"
+}
 ```
 
 ## Available Tools

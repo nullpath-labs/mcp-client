@@ -2,6 +2,8 @@
 
 > API design for automatic EIP-3009 payment signing in the nullpath MCP client.
 
+**Note:** This is a design document. The actual implementation may differ slightly. See the source files for current interfaces.
+
 ## Overview
 
 This document defines the interfaces for three new modules that enable seamless x402 micropayments:
@@ -19,8 +21,10 @@ src/lib/
 
 ### Core Types
 
+Types are defined within each module file (wallet.ts, payment.ts, eip3009.ts):
+
 ```typescript
-// src/lib/types.ts
+// Types defined in respective module files
 
 import type { Address, Hex } from 'viem';
 

@@ -10,6 +10,7 @@
 import {
   signTransferAuthorization,
   generateNonce,
+  USDC_ADDRESS_BASE,
   type TransferAuthorizationParams,
   type SignedTransferAuthorization,
 } from './eip3009.js';
@@ -17,8 +18,12 @@ import {
   createWallet,
   isWalletConfigured,
   WalletNotConfiguredError,
+  InvalidPrivateKeyError,
   type NullpathWallet,
 } from './wallet.js';
+
+/** Expected network for payments (Base mainnet) */
+const EXPECTED_NETWORK = 8453;
 
 /**
  * Payment requirements from 402 response
@@ -135,7 +140,7 @@ function parsePaymentHeader(header: string): PaymentRequirements {
     return {
       recipient: recipient as `0x${string}`,
       amount: BigInt(amount),
-      asset: (asset || '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913') as `0x${string}`,
+      asset: (asset || USDC_ADDRESS_BASE) as `0x${string}`,
       network: Number(network),
       validAfter,
       validBefore,
@@ -158,6 +163,18 @@ export async function signPayment(
   wallet: NullpathWallet,
   requirements: PaymentRequirements
 ): Promise<SignedTransferAuthorization> {
+  // Validate that the requested payment matches our signing configuration
+  const requestedNetwork = requirements.network;
+  const requestedAsset = requirements.asset?.toLowerCase();
+  const expectedAsset = USDC_ADDRESS_BASE.toLowerCase();
+
+  if (requestedNetwork !== EXPECTED_NETWORK || requestedAsset !== expectedAsset) {
+    throw new PaymentRequiredError(
+      `Payment requirements mismatch: requested network ${requestedNetwork} and asset ${requirements.asset} ` +
+      `do not match supported Base mainnet USDC (network ${EXPECTED_NETWORK}, asset ${USDC_ADDRESS_BASE}).`
+    );
+  }
+
   try {
     const params: TransferAuthorizationParams = {
       from: wallet.address,
@@ -198,6 +215,20 @@ export function encodePaymentHeader(signed: SignedTransferAuthorization): string
 }
 
 /**
+ * Build headers for fetch, properly handling Headers instances
+ */
+function buildHeaders(base?: RequestInit['headers'], extra?: Record<string, string>): Headers {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const headers = new Headers(base as any);
+  if (extra) {
+    for (const [key, value] of Object.entries(extra)) {
+      headers.set(key, value);
+    }
+  }
+  return headers;
+}
+
+/**
  * Execute a fetch request with automatic x402 payment handling
  *
  * If the server returns 402 Payment Required:
@@ -215,13 +246,15 @@ export async function fetchWithPayment(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
+  // Build headers properly (handles both plain objects and Headers instances)
+  const initialHeaders = buildHeaders(options.headers, {
+    'Content-Type': 'application/json',
+  });
+
   // Make initial request
   const response = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers: initialHeaders,
   });
 
   // Check for 402 Payment Required
@@ -241,18 +274,32 @@ export async function fetchWithPayment(
   }
 
   // Create wallet and sign payment
-  const wallet = createWallet();
+  let wallet: NullpathWallet;
+  try {
+    wallet = createWallet();
+  } catch (error) {
+    if (error instanceof InvalidPrivateKeyError) {
+      throw new PaymentSigningError(
+        `Invalid wallet configuration: ${error.message}`,
+        error
+      );
+    }
+    throw error;
+  }
+
   const signed = await signPayment(wallet, requirements);
   const paymentHeader = encodePaymentHeader(signed);
+
+  // Build retry headers with payment
+  const retryHeaders = buildHeaders(options.headers, {
+    'Content-Type': 'application/json',
+    'X-PAYMENT': paymentHeader,
+  });
 
   // Retry with payment header
   const retryResponse = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-      'X-PAYMENT': paymentHeader,
-    },
+    headers: retryHeaders,
   });
 
   // If still 402, payment was rejected
@@ -274,12 +321,14 @@ export async function fetchWithPayment(
 }
 
 /**
- * Format amount in human-readable USDC
+ * Format amount in human-readable USDC (using bigint arithmetic to avoid precision loss)
  */
 export function formatUsdcAmount(atomic: bigint): string {
-  const usd = Number(atomic) / 1_000_000;
-  return `$${usd.toFixed(6)} USDC`;
+  const whole = atomic / 1_000_000n;
+  const fraction = atomic % 1_000_000n;
+  const fractionStr = fraction.toString().padStart(6, '0');
+  return `$${whole.toString()}.${fractionStr} USDC`;
 }
 
 // Re-export wallet utilities for convenience
-export { isWalletConfigured, WalletNotConfiguredError } from './wallet.js';
+export { isWalletConfigured, WalletNotConfiguredError, InvalidPrivateKeyError } from './wallet.js';

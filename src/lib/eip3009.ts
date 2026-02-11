@@ -8,8 +8,7 @@
  * @see https://eips.ethereum.org/EIPS/eip-3009
  */
 
-import type { WalletClient, Account, Chain } from 'viem';
-import { base } from 'viem/chains';
+import type { WalletClient } from 'viem';
 
 /**
  * USDC contract address on Base mainnet

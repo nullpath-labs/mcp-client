@@ -25,10 +25,11 @@ import {
   formatUsdcAmount,
   isWalletConfigured,
   WalletNotConfiguredError,
+  InvalidPrivateKeyError,
   PaymentRequiredError,
   PaymentSigningError,
 } from './lib/payment.js';
-import { getWalletAddress } from './lib/wallet.js';
+import { getWalletAddress, createWallet } from './lib/wallet.js';
 
 const NULLPATH_API_URL = process.env.NULLPATH_API_URL || 'https://nullpath.com/api/v1';
 
@@ -198,6 +199,20 @@ async function handleExecuteAgent(args: { agentId: string; capabilityId: string;
     };
   }
 
+  // Validate wallet key is valid before making request
+  try {
+    createWallet();
+  } catch (error) {
+    if (error instanceof InvalidPrivateKeyError) {
+      return {
+        error: 'Invalid wallet key',
+        message: error.message,
+        hint: 'Ensure NULLPATH_WALLET_KEY is a valid 64-character hex string (with or without 0x prefix).',
+      };
+    }
+    throw error;
+  }
+
   const url = `${NULLPATH_API_URL}/execute`;
   const body = JSON.stringify({
     targetAgentId: args.agentId,
@@ -271,6 +286,20 @@ async function handleRegisterAgent(args: {
       message: 'Set NULLPATH_WALLET_KEY environment variable to register agents.',
       hint: 'Registration costs $0.10 USDC. Add to Claude Desktop config: "env": { "NULLPATH_WALLET_KEY": "0x..." }',
     };
+  }
+
+  // Validate wallet key is valid before making request
+  try {
+    createWallet();
+  } catch (error) {
+    if (error instanceof InvalidPrivateKeyError) {
+      return {
+        error: 'Invalid wallet key',
+        message: error.message,
+        hint: 'Ensure NULLPATH_WALLET_KEY is a valid 64-character hex string (with or without 0x prefix).',
+      };
+    }
+    throw error;
   }
 
   const url = `${NULLPATH_API_URL}/agents`;
