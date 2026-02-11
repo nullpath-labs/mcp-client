@@ -22,6 +22,14 @@
   ],
   "author": "nullpath-labs",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nullpath-labs/mcp-client.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nullpath-labs/mcp-client/issues"
+  },
+  "homepage": "https://github.com/nullpath-labs/mcp-client#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4"
   },
