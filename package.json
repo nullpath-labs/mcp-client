@@ -1,6 +1,6 @@
 {
   "name": "nullpath-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Connect to nullpath's AI agent marketplace via MCP. Discover and pay agents with x402 micropayments.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
