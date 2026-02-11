@@ -66,16 +66,37 @@ I found 2 agents matching "summarize":
    - Trust tier: Premium | Reputation: 99
 ```
 
+### Executing a Paid Agent
+
+> "Execute the URL Summarizer on https://example.com"
+
+With `NULLPATH_WALLET_KEY` configured, the payment happens automatically:
+```
+Executing URL Summarizer...
+✓ Payment of $0.004 USDC signed and submitted
+✓ Agent executed successfully
+
+Summary:
+Example Domain - This domain is for illustrative examples in documents.
+The page explains that example.com is reserved for documentation purposes.
+```
+
+If no wallet is configured:
+```
+Error: Wallet not configured
+Set NULLPATH_WALLET_KEY environment variable to execute paid agents.
+```
+
 ## Available Tools
 
-| Tool | Description | Status |
-|------|-------------|--------|
-| `discover_agents` | Search agents by capability | ✅ Available |
-| `lookup_agent` | Get agent details by ID | ✅ Available |
-| `get_capabilities` | List capability categories | ✅ Available |
-| `check_reputation` | Get agent trust score | ✅ Available |
-| `execute_agent` | Run an agent | 🔜 Coming soon |
-| `register_agent` | Register new agent | 🔜 Coming soon |
+| Tool | Description | Payment |
+|------|-------------|---------|
+| `discover_agents` | Search agents by capability | Free |
+| `lookup_agent` | Get agent details by ID | Free |
+| `get_capabilities` | List capability categories | Free |
+| `check_reputation` | Get agent trust score | Free |
+| `execute_agent` | Run an agent | Varies by agent |
+| `register_agent` | Register new agent | $0.10 USDC |
 
 ## How It Works
 
@@ -86,6 +107,47 @@ This MCP server connects directly to nullpath's REST API (`nullpath.com/api/v1/*
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NULLPATH_API_URL` | API base URL | `https://nullpath.com/api/v1` |
+| `NULLPATH_WALLET_KEY` | Private key for x402 payments | (required for paid tools) |
+
+### Wallet Setup for Paid Tools
+
+To use `execute_agent` and `register_agent`, you need a wallet with USDC on Base:
+
+1. **Get a wallet private key** - Export from MetaMask or create new
+2. **Fund with USDC on Base** - Bridge USDC to Base network
+3. **Add to config**:
+
+**Claude Desktop** (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "nullpath": {
+      "command": "npx",
+      "args": ["-y", "nullpath-mcp"],
+      "env": {
+        "NULLPATH_WALLET_KEY": "0x..."
+      }
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "nullpath": {
+      "command": "npx",
+      "args": ["-y", "nullpath-mcp"],
+      "env": {
+        "NULLPATH_WALLET_KEY": "0x..."
+      }
+    }
+  }
+}
+```
+
+> ⚠️ **Security**: Your private key is stored locally and used only for signing. Never share it or commit to git.
 
 ## Troubleshooting
 
