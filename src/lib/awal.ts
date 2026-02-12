@@ -7,10 +7,11 @@
  * @see https://docs.cdp.coinbase.com/agentic-wallet/skills/pay-for-service
  */
 
-import { exec, execSync } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Environment variable to force awal usage
@@ -94,7 +95,8 @@ export async function checkAwalStatus(): Promise<AwalStatus> {
 
   try {
     // Check if awal is available and get status
-    const { stdout } = await execAsync('npx awal@latest status --json', {
+    // Use execFileAsync to avoid shell interpretation
+    const { stdout } = await execFileAsync('npx', ['awal@latest', 'status', '--json'], {
       timeout: 15_000, // 15 second timeout for npx
       env: { ...process.env, NO_COLOR: '1' },
     });
@@ -160,6 +162,9 @@ export function clearAwalCache(): void {
 /**
  * Execute a paid request using awal x402 pay
  *
+ * Uses execFile with argument array to prevent shell injection attacks.
+ * All arguments are passed directly to npx without shell interpretation.
+ *
  * @param url - The URL to call
  * @param options - Request options (method, body, headers)
  * @returns AwalPaymentResponse with result or error
@@ -174,8 +179,9 @@ export async function awalPay(
 ): Promise<AwalPaymentResponse> {
   const { method = 'GET', body, headers } = options;
 
-  // Build the awal command
-  const args: string[] = ['npx', 'awal@latest', 'x402', 'pay', url];
+  // Build argument array for execFile (no shell interpretation)
+  // This prevents command injection attacks from malicious URLs
+  const args: string[] = ['awal@latest', 'x402', 'pay', url];
 
   // Add method
   if (method !== 'GET') {
@@ -197,45 +203,65 @@ export async function awalPay(
   // Request JSON output
   args.push('--json');
 
-  const command = args.map(arg => {
-    // Quote arguments that contain spaces or special characters
-    if (/[\s"'\\]/.test(arg)) {
-      return `'${arg.replace(/'/g, "'\\''")}'`;
-    }
-    return arg;
-  }).join(' ');
-
   try {
-    const { stdout, stderr } = await execAsync(command, {
+    // Use execFileAsync to avoid shell injection
+    // Arguments are passed directly without shell interpretation
+    const { stdout, stderr } = await execFileAsync('npx', args, {
       timeout: 60_000, // 60 second timeout for payment
       env: { ...process.env, NO_COLOR: '1' },
       maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large responses
     });
 
+    // Handle empty stdout
+    if (!stdout || !stdout.trim()) {
+      return {
+        success: false,
+        error: stderr?.trim() || 'Empty response from awal',
+      };
+    }
+
     // Parse JSON response
-    const response = JSON.parse(stdout.trim());
+    let response: Record<string, unknown>;
+    try {
+      response = JSON.parse(stdout.trim());
+    } catch {
+      throw new AwalPaymentError(`Invalid JSON response from awal: ${stdout.substring(0, 100)}`);
+    }
 
     // Handle different response formats
     if (response.error) {
       return {
         success: false,
-        error: response.error,
-        statusCode: response.statusCode,
+        error: String(response.error),
+        statusCode: typeof response.statusCode === 'number' ? response.statusCode : undefined,
       };
     }
 
     return {
       success: true,
       body: response.body || response.data || response,
-      statusCode: response.statusCode || 200,
+      statusCode: typeof response.statusCode === 'number' ? response.statusCode : 200,
       payment: {
-        amount: response.payment?.amount,
-        recipient: response.payment?.recipient,
-        transactionHash: response.payment?.transactionHash || response.txHash,
+        amount: typeof (response.payment as Record<string, unknown>)?.amount === 'string' 
+          ? (response.payment as Record<string, unknown>).amount as string 
+          : undefined,
+        recipient: typeof (response.payment as Record<string, unknown>)?.recipient === 'string'
+          ? (response.payment as Record<string, unknown>).recipient as string
+          : undefined,
+        transactionHash: typeof (response.payment as Record<string, unknown>)?.transactionHash === 'string'
+          ? (response.payment as Record<string, unknown>).transactionHash as string
+          : typeof response.txHash === 'string' 
+            ? response.txHash 
+            : undefined,
       },
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Re-throw AwalPaymentError as-is
+    if (error instanceof AwalPaymentError) {
+      throw error;
+    }
 
     // Parse stderr for error details if available
     if (error instanceof Error && 'stderr' in error) {
@@ -243,10 +269,10 @@ export async function awalPay(
       if (stderr) {
         // Try to parse stderr as JSON
         try {
-          const errorJson = JSON.parse(stderr);
+          const errorJson = JSON.parse(stderr) as Record<string, unknown>;
           return {
             success: false,
-            error: errorJson.error || errorJson.message || stderr,
+            error: String(errorJson.error || errorJson.message || stderr),
           };
         } catch {
           return {
