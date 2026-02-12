@@ -3,11 +3,15 @@
  *
  * Creates a viem wallet client from the NULLPATH_WALLET_KEY
  * environment variable for signing EIP-3009 payments.
+ * 
+ * Also supports Coinbase Agentic Wallet (awal) as an alternative
+ * payment method when available.
  */
 
 import { createWalletClient, http, type WalletClient, type Account } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
+import { checkAwalStatus, isAwalForced, type AwalStatus } from './awal.js';
 
 /**
  * Environment variable name for the wallet private key
@@ -161,4 +165,87 @@ export function getWalletAddress(): `0x${string}` | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Payment method preference
+ */
+export type PaymentMethod = 'awal' | 'direct' | 'none';
+
+/**
+ * Payment configuration
+ */
+export interface PaymentConfig {
+  /** Preferred payment method */
+  method: PaymentMethod;
+  /** Wallet address (for either method) */
+  address?: string;
+  /** Awal status if using awal */
+  awalStatus?: AwalStatus;
+}
+
+/**
+ * Determine the preferred payment method
+ *
+ * Priority:
+ * 1. If NULLPATH_USE_AWAL=true, try awal first
+ * 2. If awal is available and authenticated, use awal
+ * 3. If NULLPATH_WALLET_KEY is set, use direct signing
+ * 4. Otherwise, no payment method available
+ *
+ * @returns PaymentConfig with preferred method
+ */
+export async function getPaymentConfig(): Promise<PaymentConfig> {
+  // Check if awal is forced
+  const forceAwal = isAwalForced();
+
+  // Check awal status
+  const awalStatus = await checkAwalStatus();
+
+  // If forcing awal and it's available, use it
+  if (forceAwal && awalStatus.available && awalStatus.authenticated) {
+    return {
+      method: 'awal',
+      address: awalStatus.address,
+      awalStatus,
+    };
+  }
+
+  // If awal is available and authenticated (and not explicitly disabled), prefer it
+  if (awalStatus.available && awalStatus.authenticated) {
+    return {
+      method: 'awal',
+      address: awalStatus.address,
+      awalStatus,
+    };
+  }
+
+  // Fall back to direct signing if wallet key is configured
+  if (isWalletConfigured()) {
+    const address = getWalletAddress();
+    return {
+      method: 'direct',
+      address: address ?? undefined,
+    };
+  }
+
+  // If awal was forced but not available, return error info
+  if (forceAwal) {
+    return {
+      method: 'none',
+      awalStatus,
+    };
+  }
+
+  return { method: 'none' };
+}
+
+/**
+ * Check if any payment method is available
+ *
+ * @returns true if either awal or direct signing is configured
+ */
+export async function isPaymentConfigured(): Promise<boolean> {
+  const config = await getPaymentConfig();
+  return config.method !== 'none';
 }

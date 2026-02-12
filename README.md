@@ -112,15 +112,37 @@ This MCP server connects directly to nullpath's REST API (`nullpath.com/api/v1/*
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NULLPATH_API_URL` | API base URL | `https://nullpath.com/api/v1` |
-| `NULLPATH_WALLET_KEY` | Private key for x402 payments | (required for paid tools) |
+| `NULLPATH_WALLET_KEY` | Private key for x402 payments | (optional if using awal) |
+| `NULLPATH_USE_AWAL` | Force awal for payments | `false` |
 
-### Wallet Setup for Paid Tools
+### Payment Methods
 
-To use `execute_agent` and `register_agent`, you need a wallet with USDC on Base:
+nullpath-mcp supports two payment methods for x402 micropayments:
 
-1. **Get a wallet private key** - Export from MetaMask or create new
-2. **Fund with USDC on Base** - Bridge USDC to Base network
-3. **Add to config**:
+#### Option 1: Coinbase Agentic Wallet (Recommended)
+
+The easiest way to pay for agents. Uses the [Coinbase Agentic Wallet](https://docs.cdp.coinbase.com/agentic-wallet/) CLI.
+
+**Setup:**
+```bash
+# Install and authenticate
+npx awal@latest login
+
+# Check status
+npx awal@latest status
+```
+
+That's it! nullpath-mcp automatically detects awal and uses it for payments.
+
+**Advantages:**
+- No private key management
+- Easier setup
+- MPC-secured wallet
+- Works across multiple apps
+
+#### Option 2: Direct Private Key
+
+For advanced users who prefer direct wallet control.
 
 **Claude Desktop** (`claude_desktop_config.json`):
 ```json
@@ -153,6 +175,14 @@ To use `execute_agent` and `register_agent`, you need a wallet with USDC on Base
 ```
 
 > ⚠️ **Security**: Your private key is stored locally and used only for signing. Never share it or commit to git.
+
+### Payment Priority
+
+When both methods are available:
+1. **awal** - Used if authenticated (preferred)
+2. **NULLPATH_WALLET_KEY** - Fallback if awal not available
+
+Set `NULLPATH_USE_AWAL=true` to force awal mode (fails if not authenticated).
 
 ## Troubleshooting
 

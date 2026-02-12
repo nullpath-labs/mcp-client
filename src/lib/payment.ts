@@ -3,8 +3,9 @@
  *
  * Handles x402 payment flow:
  * 1. Parse 402 Payment Required responses
- * 2. Sign EIP-3009 TransferWithAuthorization
- * 3. Encode payment header for retry
+ * 2. Sign EIP-3009 TransferWithAuthorization OR use awal CLI
+ * 3. Encode payment header for retry (direct signing)
+ * 4. Or delegate to awal x402 pay (awal mode)
  */
 
 import {
@@ -19,8 +20,15 @@ import {
   isWalletConfigured,
   WalletNotConfiguredError,
   InvalidPrivateKeyError,
+  getPaymentConfig,
   type NullpathWallet,
+  type PaymentConfig,
 } from './wallet.js';
+import {
+  awalPay,
+  AwalPaymentError,
+  type AwalPaymentResponse,
+} from './awal.js';
 
 /** Expected network for payments (Base mainnet) */
 const EXPECTED_NETWORK = 8453;
@@ -229,23 +237,42 @@ function buildHeaders(base?: RequestInit['headers'], extra?: Record<string, stri
 }
 
 /**
+ * Result from fetchWithPayment including payment metadata
+ */
+export interface FetchWithPaymentResult {
+  /** The fetch Response object */
+  response: Response;
+  /** Payment method used (if payment was made) */
+  paymentMethod?: 'awal' | 'direct';
+  /** Address that paid (if payment was made) */
+  paidFrom?: string;
+}
+
+/**
  * Execute a fetch request with automatic x402 payment handling
  *
+ * Payment methods (in order of preference):
+ * 1. Coinbase Agentic Wallet (awal) - if available and authenticated
+ * 2. Direct EIP-3009 signing - if NULLPATH_WALLET_KEY is set
+ *
  * If the server returns 402 Payment Required:
- * 1. Parse payment requirements
- * 2. Sign EIP-3009 authorization
- * 3. Retry with X-PAYMENT header
+ * - awal mode: Delegates to `awal x402 pay` command
+ * - direct mode: Signs EIP-3009 authorization and retries with X-PAYMENT header
  *
  * @param url - Request URL
  * @param options - Fetch options
  * @returns Fetch Response
- * @throws WalletNotConfiguredError if 402 and no wallet
+ * @throws WalletNotConfiguredError if 402 and no payment method available
  * @throws PaymentSigningError if signing fails
+ * @throws AwalPaymentError if awal payment fails
  */
 export async function fetchWithPayment(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
+  // Get payment configuration
+  const paymentConfig = await getPaymentConfig();
+
   // Build headers properly (handles both plain objects and Headers instances)
   const initialHeaders = buildHeaders(options.headers, {
     'Content-Type': 'application/json',
@@ -262,13 +289,94 @@ export async function fetchWithPayment(
     return response;
   }
 
-  // Payment required - check if wallet is configured
-  if (!isWalletConfigured()) {
+  // Payment required - check if any payment method is available
+  if (paymentConfig.method === 'none') {
     throw new WalletNotConfiguredError();
   }
 
-  // Parse payment requirements
-  const requirements = parsePaymentRequired(response);
+  // Use awal for payment if configured
+  if (paymentConfig.method === 'awal') {
+    return handleAwalPayment(url, options);
+  }
+
+  // Use direct signing
+  return handleDirectPayment(url, options, response);
+}
+
+/**
+ * Handle payment using Coinbase Agentic Wallet (awal)
+ */
+async function handleAwalPayment(
+  url: string,
+  options: RequestInit
+): Promise<Response> {
+  // Extract headers as plain object
+  const headers: Record<string, string> = {};
+  const originalHeaders = options.headers;
+  
+  if (originalHeaders) {
+    if (originalHeaders instanceof Headers) {
+      originalHeaders.forEach((value, key) => {
+        headers[key] = value;
+      });
+    } else if (Array.isArray(originalHeaders)) {
+      for (const [key, value] of originalHeaders) {
+        headers[key] = value;
+      }
+    } else {
+      Object.assign(headers, originalHeaders);
+    }
+  }
+
+  // Ensure Content-Type is set
+  if (!headers['Content-Type'] && !headers['content-type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  try {
+    const result = await awalPay(url, {
+      method: options.method as string || 'GET',
+      body: options.body as string | undefined,
+      headers,
+    });
+
+    if (!result.success) {
+      throw new AwalPaymentError(result.error || 'awal payment failed');
+    }
+
+    // Create a synthetic Response from awal result
+    const responseBody = typeof result.body === 'string' 
+      ? result.body 
+      : JSON.stringify(result.body);
+
+    return new Response(responseBody, {
+      status: result.statusCode || 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Payment-Method': 'awal',
+      },
+    });
+  } catch (error) {
+    if (error instanceof AwalPaymentError) {
+      throw error;
+    }
+    throw new AwalPaymentError(
+      `awal payment failed: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+/**
+ * Handle payment using direct EIP-3009 signing
+ */
+async function handleDirectPayment(
+  url: string,
+  options: RequestInit,
+  initialResponse: Response
+): Promise<Response> {
+  // Parse payment requirements from 402 response
+  const requirements = parsePaymentRequired(initialResponse);
   if (!requirements) {
     throw new PaymentRequiredError('Payment required but could not parse requirements');
   }
@@ -331,4 +439,5 @@ export function formatUsdcAmount(atomic: bigint): string {
 }
 
 // Re-export wallet utilities for convenience
-export { isWalletConfigured, WalletNotConfiguredError, InvalidPrivateKeyError } from './wallet.js';
+export { isWalletConfigured, WalletNotConfiguredError, InvalidPrivateKeyError, getPaymentConfig } from './wallet.js';
+export { AwalPaymentError, checkAwalStatus, isAwalForced } from './awal.js';

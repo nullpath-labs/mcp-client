@@ -28,8 +28,10 @@ import {
   InvalidPrivateKeyError,
   PaymentRequiredError,
   PaymentSigningError,
+  AwalPaymentError,
+  getPaymentConfig,
 } from './lib/payment.js';
-import { getWalletAddress, createWallet } from './lib/wallet.js';
+import { getWalletAddress, createWallet, isPaymentConfigured } from './lib/wallet.js';
 
 const NULLPATH_API_URL = process.env.NULLPATH_API_URL || 'https://nullpath.com/api/v1';
 
@@ -190,27 +192,35 @@ async function handleCheckReputation(args: { agentId: string }) {
 }
 
 async function handleExecuteAgent(args: { agentId: string; capabilityId: string; input: unknown }) {
-  // Check wallet configuration upfront for better error messages
-  if (!isWalletConfigured()) {
+  // Check payment configuration upfront for better error messages
+  const paymentConfig = await getPaymentConfig();
+  
+  if (paymentConfig.method === 'none') {
     return {
-      error: 'Wallet not configured',
-      message: 'Set NULLPATH_WALLET_KEY environment variable with your private key to execute paid agents.',
-      hint: 'Add to Claude Desktop config: "env": { "NULLPATH_WALLET_KEY": "0x..." }',
+      error: 'Payment not configured',
+      message: 'No payment method available. Configure one of the following:',
+      options: [
+        '1. Use Coinbase Agentic Wallet: npx awal@latest login',
+        '2. Set NULLPATH_WALLET_KEY environment variable with your private key',
+      ],
+      hint: 'Awal is recommended for easier wallet management.',
     };
   }
 
-  // Validate wallet key is valid before making request
-  try {
-    createWallet();
-  } catch (error) {
-    if (error instanceof InvalidPrivateKeyError) {
-      return {
-        error: 'Invalid wallet key',
-        message: error.message,
-        hint: 'Ensure NULLPATH_WALLET_KEY is a valid 64-character hex string (with or without 0x prefix).',
-      };
+  // Validate direct signing wallet if that's the method
+  if (paymentConfig.method === 'direct') {
+    try {
+      createWallet();
+    } catch (error) {
+      if (error instanceof InvalidPrivateKeyError) {
+        return {
+          error: 'Invalid wallet key',
+          message: error.message,
+          hint: 'Ensure NULLPATH_WALLET_KEY is a valid 64-character hex string (with or without 0x prefix).',
+        };
+      }
+      throw error;
     }
-    throw error;
   }
 
   const url = `${NULLPATH_API_URL}/execute`;
@@ -221,7 +231,7 @@ async function handleExecuteAgent(args: { agentId: string; capabilityId: string;
   });
 
   try {
-    // Use fetchWithPayment for automatic 402 handling
+    // Use fetchWithPayment for automatic 402 handling (supports both awal and direct)
     const response = await fetchWithPayment(url, {
       method: 'POST',
       body,
@@ -234,13 +244,13 @@ async function handleExecuteAgent(args: { agentId: string; capabilityId: string;
 
     const result = await response.json() as Record<string, unknown>;
     
-    // Add wallet info to response for transparency
-    const walletAddress = getWalletAddress() ?? 'unknown';
+    // Add payment info to response for transparency
     return {
       ...result,
       _payment: {
         status: 'paid',
-        from: walletAddress,
+        method: paymentConfig.method,
+        from: paymentConfig.address ?? 'unknown',
       },
     };
   } catch (error) {
@@ -248,7 +258,7 @@ async function handleExecuteAgent(args: { agentId: string; capabilityId: string;
       return {
         error: 'Wallet not configured',
         message: error.message,
-        hint: 'Add NULLPATH_WALLET_KEY to your environment variables.',
+        hint: 'Use awal (npx awal@latest login) or add NULLPATH_WALLET_KEY to your environment.',
       };
     }
     if (error instanceof PaymentRequiredError) {
@@ -268,6 +278,13 @@ async function handleExecuteAgent(args: { agentId: string; capabilityId: string;
         hint: 'Check that your wallet has sufficient USDC balance on Base.',
       };
     }
+    if (error instanceof AwalPaymentError) {
+      return {
+        error: 'Awal payment failed',
+        message: error.message,
+        hint: 'Check awal status with: npx awal@latest status',
+      };
+    }
     throw error;
   }
 }
@@ -279,34 +296,42 @@ async function handleRegisterAgent(args: {
   capabilities: unknown[];
   endpoint: string;
 }) {
-  // Check wallet configuration upfront for better error messages
-  if (!isWalletConfigured()) {
+  // Check payment configuration upfront for better error messages
+  const paymentConfig = await getPaymentConfig();
+  
+  if (paymentConfig.method === 'none') {
     return {
-      error: 'Wallet not configured',
-      message: 'Set NULLPATH_WALLET_KEY environment variable to register agents.',
-      hint: 'Registration costs $0.10 USDC. Add to Claude Desktop config: "env": { "NULLPATH_WALLET_KEY": "0x..." }',
+      error: 'Payment not configured',
+      message: 'No payment method available. Registration costs $0.10 USDC.',
+      options: [
+        '1. Use Coinbase Agentic Wallet: npx awal@latest login',
+        '2. Set NULLPATH_WALLET_KEY environment variable with your private key',
+      ],
+      hint: 'Awal is recommended for easier wallet management.',
     };
   }
 
-  // Validate wallet key is valid before making request
-  try {
-    createWallet();
-  } catch (error) {
-    if (error instanceof InvalidPrivateKeyError) {
-      return {
-        error: 'Invalid wallet key',
-        message: error.message,
-        hint: 'Ensure NULLPATH_WALLET_KEY is a valid 64-character hex string (with or without 0x prefix).',
-      };
+  // Validate direct signing wallet if that's the method
+  if (paymentConfig.method === 'direct') {
+    try {
+      createWallet();
+    } catch (error) {
+      if (error instanceof InvalidPrivateKeyError) {
+        return {
+          error: 'Invalid wallet key',
+          message: error.message,
+          hint: 'Ensure NULLPATH_WALLET_KEY is a valid 64-character hex string (with or without 0x prefix).',
+        };
+      }
+      throw error;
     }
-    throw error;
   }
 
   const url = `${NULLPATH_API_URL}/agents`;
   const body = JSON.stringify(args);
 
   try {
-    // Use fetchWithPayment for automatic 402 handling
+    // Use fetchWithPayment for automatic 402 handling (supports both awal and direct)
     const response = await fetchWithPayment(url, {
       method: 'POST',
       body,
@@ -319,13 +344,13 @@ async function handleRegisterAgent(args: {
 
     const result = await response.json() as Record<string, unknown>;
     
-    // Add wallet info to response for transparency
-    const walletAddress = getWalletAddress() ?? 'unknown';
+    // Add payment info to response for transparency
     return {
       ...result,
       _payment: {
         status: 'paid',
-        from: walletAddress,
+        method: paymentConfig.method,
+        from: paymentConfig.address ?? 'unknown',
         cost: '$0.10 USDC',
       },
     };
@@ -335,6 +360,7 @@ async function handleRegisterAgent(args: {
         error: 'Wallet not configured',
         message: error.message,
         cost: '$0.10 USDC required for registration',
+        hint: 'Use awal (npx awal@latest login) or add NULLPATH_WALLET_KEY to your environment.',
       };
     }
     if (error instanceof PaymentRequiredError) {
@@ -352,6 +378,13 @@ async function handleRegisterAgent(args: {
         error: 'Payment signing failed',
         message: error.message,
         hint: 'Ensure your wallet has at least $0.10 USDC on Base.',
+      };
+    }
+    if (error instanceof AwalPaymentError) {
+      return {
+        error: 'Awal payment failed',
+        message: error.message,
+        hint: 'Check awal status with: npx awal@latest status',
       };
     }
     throw error;
