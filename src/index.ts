@@ -23,7 +23,6 @@ import {
 import {
   fetchWithPayment,
   formatUsdcAmount,
-  isWalletConfigured,
   WalletNotConfiguredError,
   InvalidPrivateKeyError,
   PaymentRequiredError,
@@ -31,7 +30,7 @@ import {
   AwalPaymentError,
   getPaymentConfig,
 } from './lib/payment.js';
-import { getWalletAddress, createWallet, isPaymentConfigured } from './lib/wallet.js';
+import { createWallet } from './lib/wallet.js';
 
 const NULLPATH_API_URL = process.env.NULLPATH_API_URL || 'https://nullpath.com/api/v1';
 
@@ -244,15 +243,20 @@ async function handleExecuteAgent(args: { agentId: string; capabilityId: string;
 
     const result = await response.json() as Record<string, unknown>;
     
-    // Add payment info to response for transparency
-    return {
-      ...result,
-      _payment: {
-        status: 'paid',
-        method: paymentConfig.method,
-        from: paymentConfig.address ?? 'unknown',
-      },
-    };
+    // Only add payment info if a payment was actually made (check for X-Payment-Method header)
+    const paymentMethod = response.headers.get('X-Payment-Method');
+    if (paymentMethod) {
+      return {
+        ...result,
+        _payment: {
+          status: 'paid',
+          method: paymentMethod,
+          from: paymentConfig.address ?? 'unknown',
+        },
+      };
+    }
+    
+    return result;
   } catch (error) {
     if (error instanceof WalletNotConfiguredError) {
       return {
@@ -344,16 +348,21 @@ async function handleRegisterAgent(args: {
 
     const result = await response.json() as Record<string, unknown>;
     
-    // Add payment info to response for transparency
-    return {
-      ...result,
-      _payment: {
-        status: 'paid',
-        method: paymentConfig.method,
-        from: paymentConfig.address ?? 'unknown',
-        cost: '$0.10 USDC',
-      },
-    };
+    // Only add payment info if a payment was actually made (check for X-Payment-Method header)
+    const paymentMethod = response.headers.get('X-Payment-Method');
+    if (paymentMethod) {
+      return {
+        ...result,
+        _payment: {
+          status: 'paid',
+          method: paymentMethod,
+          from: paymentConfig.address ?? 'unknown',
+          cost: '$0.10 USDC',
+        },
+      };
+    }
+    
+    return result;
   } catch (error) {
     if (error instanceof WalletNotConfiguredError) {
       return {

@@ -17,12 +17,10 @@ import {
 } from './eip3009.js';
 import {
   createWallet,
-  isWalletConfigured,
   WalletNotConfiguredError,
   InvalidPrivateKeyError,
   getPaymentConfig,
   type NullpathWallet,
-  type PaymentConfig,
 } from './wallet.js';
 import {
   awalPay,
@@ -101,16 +99,12 @@ export function parsePaymentRequired(response: Response): PaymentRequirements | 
     return null;
   }
 
+  // Headers API is case-insensitive, so this handles all casing variants
   const header = response.headers.get('X-PAYMENT-REQUIRED');
   if (!header) {
-    // Try legacy header name
-    const legacyHeader = response.headers.get('X-Payment-Required');
-    if (!legacyHeader) {
-      throw new PaymentRequiredError(
-        'Payment required but X-PAYMENT-REQUIRED header missing'
-      );
-    }
-    return parsePaymentHeader(legacyHeader);
+    throw new PaymentRequiredError(
+      'Payment required but X-PAYMENT-REQUIRED header missing'
+    );
   }
 
   return parsePaymentHeader(header);
@@ -425,7 +419,21 @@ async function handleDirectPayment(
     throw new Error(`Payment submitted but request failed (${retryResponse.status}): ${errorBody}`);
   }
 
-  return retryResponse;
+  // Add payment method header to indicate payment was made
+  const responseWithMeta = new Response(retryResponse.body, {
+    status: retryResponse.status,
+    statusText: retryResponse.statusText,
+    headers: retryResponse.headers,
+  });
+  // Clone headers and add payment method
+  const newHeaders = new Headers(retryResponse.headers);
+  newHeaders.set('X-Payment-Method', 'direct');
+  
+  return new Response(retryResponse.body, {
+    status: retryResponse.status,
+    statusText: retryResponse.statusText,
+    headers: newHeaders,
+  });
 }
 
 /**

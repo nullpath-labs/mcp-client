@@ -7,10 +7,9 @@
  * @see https://docs.cdp.coinbase.com/agentic-wallet/skills/pay-for-service
  */
 
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 /**

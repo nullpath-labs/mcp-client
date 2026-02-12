@@ -202,8 +202,8 @@ export async function getPaymentConfig(): Promise<PaymentConfig> {
   // Check awal status
   const awalStatus = await checkAwalStatus();
 
-  // If forcing awal and it's available, use it
-  if (forceAwal && awalStatus.available && awalStatus.authenticated) {
+  // If awal is available and authenticated, use it
+  if (awalStatus.available && awalStatus.authenticated) {
     return {
       method: 'awal',
       address: awalStatus.address,
@@ -211,11 +211,10 @@ export async function getPaymentConfig(): Promise<PaymentConfig> {
     };
   }
 
-  // If awal is available and authenticated (and not explicitly disabled), prefer it
-  if (awalStatus.available && awalStatus.authenticated) {
+  // If awal was forced but not available/authenticated, don't fall back to direct
+  if (forceAwal) {
     return {
-      method: 'awal',
-      address: awalStatus.address,
+      method: 'none',
       awalStatus,
     };
   }
@@ -226,14 +225,6 @@ export async function getPaymentConfig(): Promise<PaymentConfig> {
     return {
       method: 'direct',
       address: address ?? undefined,
-    };
-  }
-
-  // If awal was forced but not available, return error info
-  if (forceAwal) {
-    return {
-      method: 'none',
-      awalStatus,
     };
   }
 

@@ -83,12 +83,12 @@ With `NULLPATH_WALLET_KEY` configured, the payment happens automatically:
 }
 ```
 
-If no wallet is configured:
+If no payment method is configured:
 ```json
 {
-  "error": "Wallet not configured",
-  "message": "Set NULLPATH_WALLET_KEY environment variable with your private key to execute paid agents.",
-  "hint": "Add to Claude Desktop config: \"env\": { \"NULLPATH_WALLET_KEY\": \"0x...\" }"
+  "error": "Payment not configured",
+  "message": "Paid agents require a configured payment method (wallet key or awal).",
+  "hint": "Use awal (npx awal@latest login) or set NULLPATH_WALLET_KEY in your Claude Desktop config."
 }
 ```
 
