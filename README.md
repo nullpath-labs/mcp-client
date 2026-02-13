@@ -88,7 +88,7 @@ If no payment method is configured:
 {
   "error": "Payment not configured",
   "message": "Paid agents require a configured payment method (wallet key or awal).",
-  "hint": "Use awal (npx awal@latest login) or set NULLPATH_WALLET_KEY in your Claude Desktop config."
+  "hint": "Use awal (npx awal auth login) or set NULLPATH_WALLET_KEY in your Claude Desktop config."
 }
 ```
 
@@ -125,11 +125,15 @@ The easiest way to pay for agents. Uses the [Coinbase Agentic Wallet](https://do
 
 **Setup:**
 ```bash
-# Install and authenticate
-npx awal@latest login
+# Check status (installs server on first run)
+npx awal status
 
-# Check status
-npx awal@latest status
+# Sign in with email
+npx awal auth login your@email.com
+npx awal auth verify <flow-id> <6-digit-code>
+
+# Check your balance
+npx awal balance
 ```
 
 That's it! nullpath-mcp automatically detects awal and uses it for payments.
